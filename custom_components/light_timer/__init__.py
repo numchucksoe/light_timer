@@ -39,6 +39,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import (
     CONF_DEFAULT_SUSPENSION,
@@ -174,6 +175,35 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload a Light Timer config entry (alias for :func:`async_reload_entry`)."""
     await async_reload_entry(hass, entry)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow removal of devices that no longer have managed lights (Req 1.5).
+
+    Returns ``True`` if the device's identifier corresponds to a light that is
+    no longer managed by the coordinator (i.e. was removed from the config),
+    allowing Home Assistant to clean up the orphaned device.
+
+    Returns ``False`` for the Integration_Device (entry_id identifier) while the
+    config entry exists, and ``False`` as a safe default for unknown devices.
+    """
+    coordinator: LightTimerCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is None:
+        return True
+
+    for identifier in device_entry.identifiers:
+        if len(identifier) == 2 and identifier[0] == DOMAIN:
+            # If it's the integration device, don't remove while entry exists.
+            if identifier[1] == entry.entry_id:
+                return False
+            # If it's a per-light device, allow removal if light is no longer managed.
+            if identifier[1] not in coordinator.controllers:
+                return True
+    return False
 
 
 # -- Services --------------------------------------------------------------

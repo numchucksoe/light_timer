@@ -21,21 +21,11 @@ from __future__ import annotations
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import LightTimerCoordinator, PerLightController
-
-
-def _friendly_light_name(light_entity_id: str) -> str:
-    """Return a human-friendly name fragment for a managed light entity id.
-
-    Strips the ``light.`` domain prefix and turns the object id into a
-    title-cased, space-separated label (e.g. ``light.living_room`` ->
-    ``Living Room``) for use in the button entity names.
-    """
-    object_id = light_entity_id.split(".", 1)[-1]
-    return object_id.replace("_", " ").title()
 
 
 async def async_setup_entry(
@@ -59,6 +49,14 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
+    """Get the friendly name of a light entity, falling back to object_id."""
+    state = hass.states.get(light_entity_id)
+    if state and state.attributes.get("friendly_name"):
+        return state.attributes["friendly_name"]
+    return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
+
+
 class _LightTimerButtonBase(ButtonEntity):
     """Common wiring for the per-light Light Timer action buttons.
 
@@ -66,7 +64,7 @@ class _LightTimerButtonBase(ButtonEntity):
     declares the button as an integration-controlled (non-pollable) entity.
     """
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_should_poll = False
 
     def __init__(
@@ -79,6 +77,16 @@ class _LightTimerButtonBase(ButtonEntity):
         self._coordinator = coordinator
         self._entry = entry
         self._light_id = controller.light_entity_id
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to the per-light Timer_Device."""
+        friendly_name = _get_light_friendly_name(self.hass, self._light_id)
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._light_id)},
+            name=f"{friendly_name}_timer",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
 
 class LightTimerCancelButton(_LightTimerButtonBase):
@@ -98,7 +106,7 @@ class LightTimerCancelButton(_LightTimerButtonBase):
         """Initialise the cancel button with a per-light unique id and name."""
         super().__init__(coordinator, entry, controller)
         self._attr_unique_id = f"{entry.entry_id}_{self._light_id}_cancel"
-        self._attr_name = f"Cancel Timer {_friendly_light_name(self._light_id)}"
+        self._attr_name = "Cancel timer"
 
     async def async_press(self) -> None:
         """Cancel the managed light's running timer (Req 5.1)."""
@@ -122,7 +130,7 @@ class LightTimerSuspendButton(_LightTimerButtonBase):
         """Initialise the suspend button with a per-light unique id and name."""
         super().__init__(coordinator, entry, controller)
         self._attr_unique_id = f"{entry.entry_id}_{self._light_id}_suspend"
-        self._attr_name = f"Suspend Timer {_friendly_light_name(self._light_id)}"
+        self._attr_name = "Suspend timer"
 
     async def async_press(self) -> None:
         """Suspend the managed light using the configured default duration (Req 6.8)."""

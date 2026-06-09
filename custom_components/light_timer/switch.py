@@ -28,6 +28,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -38,6 +39,15 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import LightTimerCoordinator, PerLightController
+
+
+def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
+    """Get the friendly name of a light entity, falling back to object_id."""
+    state = hass.states.get(light_entity_id)
+    if state and state.attributes.get("friendly_name"):
+        return state.attributes["friendly_name"]
+    # Fallback: strip domain and title-case the object_id
+    return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
 
 
 async def async_setup_entry(
@@ -66,7 +76,7 @@ async def async_setup_entry(
 class LightTimerEnableSwitch(SwitchEntity):
     """Per-light enable switch mapping to ``async_set_enabled`` (Req 7.6, 7.7)."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_should_poll = False
 
     def __init__(
@@ -86,12 +96,22 @@ class LightTimerEnableSwitch(SwitchEntity):
         self._entry = entry
         self._light_id = controller.light_entity_id
         self._attr_unique_id = f"{entry.entry_id}_{self._light_id}_enable"
-        self._attr_name = f"Light Timer {self._light_id} enabled"
+        self._attr_name = "Enabled"
 
     @property
     def _controller(self) -> PerLightController | None:
         """Return the live controller for this switch, or ``None`` if removed."""
         return self._coordinator.controllers.get(self._light_id)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to its per-light Timer_Device."""
+        friendly_name = _get_light_friendly_name(self.hass, self._light_id)
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._light_id)},
+            name=f"{friendly_name}_timer",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     @property
     def is_on(self) -> bool:
@@ -147,7 +167,7 @@ class LightTimerEnableSwitch(SwitchEntity):
 class LightTimerMasterSwitch(SwitchEntity):
     """Global master switch mapping to ``async_set_global`` (Req 7.8, 7.13, 7.14)."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_should_poll = False
 
     def __init__(
@@ -164,7 +184,16 @@ class LightTimerMasterSwitch(SwitchEntity):
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_master"
-        self._attr_name = "Light Timer master"
+        self._attr_name = "Master"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to attach this entity to the Integration_Device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name="Light Timer",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     @property
     def is_on(self) -> bool:

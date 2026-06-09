@@ -45,11 +45,27 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import LightTimerCoordinator, PerLightController
 from .logic import ControllerRuntimeState, SensorRepresentation, derive_sensor
+
+
+def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
+    """Get the friendly name of a light entity, falling back to object_id.
+
+    Looks up the current state of the light entity in the HA state machine. If
+    it has a ``friendly_name`` attribute, that is returned. Otherwise, the
+    object_id portion of the entity ID is converted to a human-readable form
+    (underscores replaced with spaces, title-cased).
+    """
+    state = hass.states.get(light_entity_id)
+    if state and state.attributes.get("friendly_name"):
+        return state.attributes["friendly_name"]
+    # Fallback: strip domain and title-case the object_id
+    return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
 
 
 async def async_setup_entry(
@@ -117,12 +133,28 @@ class LightTimerRemainingSensor(SensorEntity):
         # A stable, per-light unique id so the entity persists across reloads
         # and is removed only when its managed light is removed (Req 10.3).
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{self._light_entity_id}_remaining"
-        self._attr_name = f"{self._light_entity_id} timer remaining"
+        self._attr_name = "Timer remaining"
 
     @property
     def _controller(self) -> PerLightController | None:
         """Return the live controller for this light, or ``None`` if removed."""
         return self._coordinator.controllers.get(self._light_entity_id)
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to the per-light Timer_Device.
+
+        The device name is derived from the managed light's friendly name with
+        ``_timer`` appended (Req 1.2, 6.1, 6.3, 6.4).
+        """
+        friendly_name = _get_light_friendly_name(
+            self.hass, self._light_entity_id
+        )
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._light_entity_id)},
+            name=f"{friendly_name}_timer",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     @property
     def available(self) -> bool:
