@@ -514,6 +514,7 @@ class LightTimerCoordinator:
                 controller.failure_active = False
                 controller._retry_count = 0
                 self._maybe_stop_tick()
+                self._notify_update()
                 return
 
             if controller._retry_count < _MAX_OFF_RETRIES:
@@ -527,6 +528,7 @@ class LightTimerCoordinator:
             # in the failure state, raise the failure indication, and notify.
             controller.state = next_state(controller.state, TimerEvent("retry_fail"))
             controller.failure_active = True
+            self._notify_update()
             await self._async_notify_failure(controller)
 
         return _on_confirm
@@ -646,6 +648,7 @@ class LightTimerCoordinator:
         controller._retry_count = 0
         controller.state = LightTimerState.IDLE
         self._maybe_stop_tick()
+        self._notify_update()
         return True
 
     # -- Suspension -------------------------------------------------------
@@ -719,6 +722,7 @@ class LightTimerCoordinator:
             self._make_suspension_end_callback(light_id),
         )
         self._start_tick()
+        self._notify_update()
         return True
 
     def _make_suspension_end_callback(self, light_id: str) -> Callable:
@@ -759,6 +763,7 @@ class LightTimerCoordinator:
                 self.async_start_timer(light_id)
             else:
                 self._maybe_stop_tick()
+                self._notify_update()
 
         return _on_suspension_end
 
@@ -815,6 +820,7 @@ class LightTimerCoordinator:
             controller.config.enabled = False
             controller.state = next_state(controller.state, TimerEvent("disable"))
             self._maybe_stop_tick()
+            self._notify_update()
             return
 
         # Enable: clear disabled/suspended status and re-arm if appropriate.
@@ -835,6 +841,8 @@ class LightTimerCoordinator:
             globally_enabled=self.globally_enabled,
         ):
             self.async_start_timer(light_id)
+        else:
+            self._notify_update()
 
     @callback
     def async_set_global(self, enabled: bool) -> None:
