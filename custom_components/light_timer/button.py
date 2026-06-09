@@ -58,6 +58,28 @@ def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
     return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
 
 
+def _link_to_light_device(
+    hass: HomeAssistant, light_entity_id: str
+) -> DeviceInfo | None:
+    """Build a "link" DeviceInfo to the managed light's device, if it has one."""
+    ent_reg = er.async_get(hass)
+    light_entry = ent_reg.async_get(light_entity_id)
+    if light_entry is None or light_entry.device_id is None:
+        return None
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get(light_entry.device_id)
+    if device is None:
+        return None
+    if not device.identifiers and not device.connections:
+        return None
+    link = DeviceInfo()
+    if device.identifiers:
+        link["identifiers"] = set(device.identifiers)
+    if device.connections:
+        link["connections"] = set(device.connections)
+    return link
+
+
 class _LightTimerButtonBase(ButtonEntity):
     """Common wiring for the per-light Light Timer action buttons.
 
@@ -82,13 +104,9 @@ class _LightTimerButtonBase(ButtonEntity):
     @property
     def device_info(self) -> DeviceInfo | None:
         """Return device info to attach this entity to the light's device."""
-        ent_reg = er.async_get(self.hass)
-        light_entry = ent_reg.async_get(self._light_id)
-        if light_entry is not None and light_entry.device_id is not None:
-            dev_reg = dr.async_get(self.hass)
-            device = dev_reg.async_get(light_entry.device_id)
-            if device is not None:
-                return DeviceInfo(identifiers=device.identifiers)
+        link = _link_to_light_device(self.hass, self._light_id)
+        if link is not None:
+            return link
         # Fallback: standalone Timer_Device
         friendly_name = _get_light_friendly_name(self.hass, self._light_id)
         return DeviceInfo(

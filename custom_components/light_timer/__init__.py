@@ -176,9 +176,10 @@ def _async_schedule_device_link_reload(
                 )
                 return
 
-    entry.async_on_unload(
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
-    )
+    # ``async_listen_once`` auto-removes the listener after it fires, so we do
+    # NOT register it via ``async_on_unload`` (that would try to remove it a
+    # second time on reload and raise ValueError).
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
