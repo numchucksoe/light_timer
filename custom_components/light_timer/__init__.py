@@ -35,10 +35,11 @@ import logging
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import (
@@ -132,9 +133,52 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # persisted enable/disable flag) so the coordinator and entities rebuild.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
+    # If Home Assistant is still starting, a managed light's own integration
+    # (e.g. ESPHome) may not have registered the light entity/device yet, so the
+    # timer entities would fall back to a standalone device. Once HA has fully
+    # started, reload the entry so the entities re-evaluate their device link
+    # and attach to the light's device.
+    _async_schedule_device_link_reload(hass, entry, controllers)
+
     _async_register_services(hass)
 
     return True
+
+
+@callback
+def _async_schedule_device_link_reload(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    controllers: dict[str, PerLightController],
+) -> None:
+    """Reload the entry after HA starts if any light's device isn't linked yet.
+
+    During startup the managed lights may not yet be registered (their
+    integrations can load after this one), so the timer entities cannot attach
+    to the light's device. After ``EVENT_HOMEASSISTANT_STARTED`` everything is
+    loaded; if any managed light has a device that the timer entities aren't
+    linked to yet, reload the entry once so the link is established.
+    """
+    if hass.state is CoreState.running:
+        # Already fully started: device info was resolved correctly at setup.
+        return
+
+    @callback
+    def _on_started(_event: Event) -> None:
+        ent_reg = er.async_get(hass)
+        for light_id in controllers:
+            light_entry = ent_reg.async_get(light_id)
+            if light_entry is not None and light_entry.device_id is not None:
+                # At least one managed light now has a device; reload so the
+                # timer entities attach to it.
+                hass.async_create_task(
+                    hass.config_entries.async_reload(entry.entry_id)
+                )
+                return
+
+    entry.async_on_unload(
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
