@@ -45,6 +45,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -67,6 +68,25 @@ def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
         return state.attributes["friendly_name"]
     # Fallback: strip domain and title-case the object_id
     return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
+
+
+def _get_light_device_info(hass: HomeAssistant, light_entity_id: str) -> DeviceInfo | None:
+    """Look up the device that owns the light entity, if any.
+
+    Returns a DeviceInfo with the light's device identifiers so that timer
+    entities attach to the same device as the light. Returns None if the light
+    has no device (e.g. template lights), in which case callers fall back to a
+    standalone Timer_Device.
+    """
+    ent_reg = er.async_get(hass)
+    entry = ent_reg.async_get(light_entity_id)
+    if entry is None or entry.device_id is None:
+        return None
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get(entry.device_id)
+    if device is None:
+        return None
+    return DeviceInfo(identifiers=device.identifiers)
 
 
 async def async_setup_entry(
@@ -155,12 +175,17 @@ class LightTimerRemainingSensor(SensorEntity):
         self.async_write_ha_state()
 
     @property
-    def device_info(self) -> DeviceInfo:
-        """Return device info to link this entity to the per-light Timer_Device.
+    def device_info(self) -> DeviceInfo | None:
+        """Return device info to attach this entity to the light's device.
 
-        The device name is derived from the managed light's friendly name with
-        ``_timer`` appended (Req 1.2, 6.1, 6.3, 6.4).
+        If the managed light belongs to a device, the timer entity attaches to
+        that same device so they appear together in the UI. If the light has no
+        device (e.g. template lights), falls back to a standalone Timer_Device.
         """
+        info = _get_light_device_info(self.hass, self._light_entity_id)
+        if info is not None:
+            return info
+        # Fallback: standalone Timer_Device
         friendly_name = _get_light_friendly_name(
             self.hass, self._light_entity_id
         )

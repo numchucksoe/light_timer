@@ -21,6 +21,7 @@ from __future__ import annotations
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -57,6 +58,19 @@ def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
     return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
 
 
+def _get_light_device_info(hass: HomeAssistant, light_entity_id: str) -> DeviceInfo | None:
+    """Look up the device that owns the light entity, if any."""
+    ent_reg = er.async_get(hass)
+    entry = ent_reg.async_get(light_entity_id)
+    if entry is None or entry.device_id is None:
+        return None
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get(entry.device_id)
+    if device is None:
+        return None
+    return DeviceInfo(identifiers=device.identifiers)
+
+
 class _LightTimerButtonBase(ButtonEntity):
     """Common wiring for the per-light Light Timer action buttons.
 
@@ -79,8 +93,12 @@ class _LightTimerButtonBase(ButtonEntity):
         self._light_id = controller.light_entity_id
 
     @property
-    def device_info(self) -> DeviceInfo:
-        """Return device info to link this entity to the per-light Timer_Device."""
+    def device_info(self) -> DeviceInfo | None:
+        """Return device info to attach this entity to the light's device."""
+        info = _get_light_device_info(self.hass, self._light_id)
+        if info is not None:
+            return info
+        # Fallback: standalone Timer_Device
         friendly_name = _get_light_friendly_name(self.hass, self._light_id)
         return DeviceInfo(
             identifiers={(DOMAIN, self._light_id)},
