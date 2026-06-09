@@ -284,8 +284,13 @@ class LightTimerCoordinator:
                 active = True
         if active:
             self._schedule_next_tick()
-            async_dispatcher_send(self.hass, SIGNAL_TIMER_TICK)
+            self._notify_update()
         # If nothing was active, tick stops naturally (no reschedule).
+
+    @callback
+    def _notify_update(self) -> None:
+        """Push a state update to the timer sensors (live countdown + state)."""
+        async_dispatcher_send(self.hass, SIGNAL_TIMER_TICK)
 
     # -- State-change handling -------------------------------------------
 
@@ -363,6 +368,7 @@ class LightTimerCoordinator:
             controller._retry_count = 0
             controller.state = resulting
             self._maybe_stop_tick()
+            self._notify_update()
 
     # -- Timer start ------------------------------------------------------
 
@@ -399,6 +405,7 @@ class LightTimerCoordinator:
             self._make_expiry_callback(light_id),
         )
         self._start_tick()
+        self._notify_update()
 
     def _make_expiry_callback(self, light_id: str) -> Callable:
         """Build the ``async_call_later`` callback fired when a timer expires.
@@ -446,6 +453,7 @@ class LightTimerCoordinator:
         controller._retry_count = 0
         await self._async_turn_off(controller.light_entity_id)
         self._schedule_off_confirmation(controller)
+        self._notify_update()
 
     @callback
     def _schedule_off_confirmation(self, controller: PerLightController) -> None:
