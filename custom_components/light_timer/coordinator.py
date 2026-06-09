@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SERVICE_TURN_OFF, STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
@@ -40,6 +41,7 @@ from .const import (
     DEFAULT_GLOBALLY_ENABLED,
     DEFAULT_SUSPENSION,
     DEFAULT_TIMER_DURATION,
+    DOMAIN,
 )
 from .logic import (
     RUNNING_CLASS_STATES,
@@ -61,6 +63,10 @@ _LIGHT_DOMAIN = "light"
 # the controller enters the failure state.
 _OFF_RETRY_INTERVAL: float = 5
 _MAX_OFF_RETRIES = 3
+
+# Dispatcher signal fired each second while any countdown is active, so
+# sensors can push state updates to the UI.
+SIGNAL_TIMER_TICK = f"{DOMAIN}_timer_tick"
 
 
 @dataclass
@@ -278,6 +284,7 @@ class LightTimerCoordinator:
                 active = True
         if active:
             self._schedule_next_tick()
+            async_dispatcher_send(self.hass, SIGNAL_TIMER_TICK)
         # If nothing was active, tick stops naturally (no reschedule).
 
     # -- State-change handling -------------------------------------------

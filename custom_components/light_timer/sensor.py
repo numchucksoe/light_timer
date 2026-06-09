@@ -44,12 +44,13 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LightTimerCoordinator, PerLightController
+from .coordinator import SIGNAL_TIMER_TICK, LightTimerCoordinator, PerLightController
 from .logic import ControllerRuntimeState, SensorRepresentation, derive_sensor
 
 
@@ -108,7 +109,7 @@ class LightTimerRemainingSensor(SensorEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_should_poll = True
+    _attr_should_poll = False
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -139,6 +140,19 @@ class LightTimerRemainingSensor(SensorEntity):
     def _controller(self) -> PerLightController | None:
         """Return the live controller for this light, or ``None`` if removed."""
         return self._coordinator.controllers.get(self._light_entity_id)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the coordinator's per-second tick signal."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_TIMER_TICK, self._handle_tick
+            )
+        )
+
+    @callback
+    def _handle_tick(self) -> None:
+        """Push a state update to HA on each coordinator tick."""
+        self.async_write_ha_state()
 
     @property
     def device_info(self) -> DeviceInfo:
