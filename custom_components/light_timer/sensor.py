@@ -44,12 +44,60 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .coordinator import LightTimerCoordinator, PerLightController
+from .coordinator import SIGNAL_TIMER_TICK, LightTimerCoordinator, PerLightController
 from .logic import ControllerRuntimeState, SensorRepresentation, derive_sensor
+
+
+def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
+    """Get the friendly name of a light entity, falling back to object_id.
+
+    Looks up the current state of the light entity in the HA state machine. If
+    it has a ``friendly_name`` attribute, that is returned. Otherwise, the
+    object_id portion of the entity ID is converted to a human-readable form
+    (underscores replaced with spaces, title-cased).
+    """
+    state = hass.states.get(light_entity_id)
+    if state and state.attributes.get("friendly_name"):
+        return state.attributes["friendly_name"]
+    # Fallback: strip domain and title-case the object_id
+    return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
+
+
+def _link_to_light_device(
+    hass: HomeAssistant, light_entity_id: str
+) -> DeviceInfo | None:
+    """Build a "link" DeviceInfo to the managed light's device, if it has one.
+
+    Returns a DeviceInfo carrying the light device's ``identifiers`` and/or
+    ``connections`` so HA links the timer entity to that existing device.
+    Returns ``None`` when the light has no device (e.g. template lights) or
+    when the device exposes neither identifiers nor connections.
+    """
+    ent_reg = er.async_get(hass)
+    light_entry = ent_reg.async_get(light_entity_id)
+    if light_entry is None or light_entry.device_id is None:
+        return None
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get(light_entry.device_id)
+    if device is None:
+        return None
+    # A device may identify itself via identifiers (e.g. Zigbee) and/or
+    # connections (e.g. ESPHome MAC). A "link" DeviceInfo needs at least one.
+    if not device.identifiers and not device.connections:
+        return None
+    link = DeviceInfo()
+    if device.identifiers:
+        link["identifiers"] = set(device.identifiers)
+    if device.connections:
+        link["connections"] = set(device.connections)
+    return link
 
 
 async def async_setup_entry(
@@ -92,7 +140,7 @@ class LightTimerRemainingSensor(SensorEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_should_poll = True
+    _attr_should_poll = False
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -117,12 +165,47 @@ class LightTimerRemainingSensor(SensorEntity):
         # A stable, per-light unique id so the entity persists across reloads
         # and is removed only when its managed light is removed (Req 10.3).
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{self._light_entity_id}_remaining"
-        self._attr_name = f"{self._light_entity_id} timer remaining"
+        self._attr_name = "Timer remaining"
 
     @property
     def _controller(self) -> PerLightController | None:
         """Return the live controller for this light, or ``None`` if removed."""
         return self._coordinator.controllers.get(self._light_entity_id)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the coordinator's per-second tick signal."""
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, SIGNAL_TIMER_TICK, self._handle_tick
+            )
+        )
+
+    @callback
+    def _handle_tick(self) -> None:
+        """Push a state update to HA on each coordinator tick."""
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return device info to attach this entity to the light's device.
+
+        Looks up the light entity's device in the registry. If found, returns
+        DeviceInfo with that device's identifiers — HA will add this config
+        entry to the existing device and link the entity there. If the light
+        has no device, falls back to a standalone Timer_Device.
+        """
+        link = _link_to_light_device(self.hass, self._light_entity_id)
+        if link is not None:
+            return link
+        # Fallback: standalone Timer_Device
+        friendly_name = _get_light_friendly_name(
+            self.hass, self._light_entity_id
+        )
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._light_entity_id)},
+            name=f"{friendly_name}_timer",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     @property
     def available(self) -> bool:

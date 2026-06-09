@@ -35,10 +35,12 @@ import logging
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import (
     CONF_DEFAULT_SUSPENSION,
@@ -131,9 +133,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # persisted enable/disable flag) so the coordinator and entities rebuild.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
+    # If Home Assistant is still starting, a managed light's own integration
+    # (e.g. ESPHome) may not have registered the light entity/device yet, so the
+    # timer entities would fall back to a standalone device. Once HA has fully
+    # started, reload the entry so the entities re-evaluate their device link
+    # and attach to the light's device.
+    _async_schedule_device_link_reload(hass, entry, controllers)
+
     _async_register_services(hass)
 
     return True
+
+
+@callback
+def _async_schedule_device_link_reload(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    controllers: dict[str, PerLightController],
+) -> None:
+    """Reload the entry after HA starts if any light's device isn't linked yet.
+
+    During startup the managed lights may not yet be registered (their
+    integrations can load after this one), so the timer entities cannot attach
+    to the light's device. After ``EVENT_HOMEASSISTANT_STARTED`` everything is
+    loaded; if any managed light has a device that the timer entities aren't
+    linked to yet, reload the entry once so the link is established.
+    """
+    if hass.state is CoreState.running:
+        # Already fully started: device info was resolved correctly at setup.
+        return
+
+    @callback
+    def _on_started(_event: Event) -> None:
+        ent_reg = er.async_get(hass)
+        for light_id in controllers:
+            light_entry = ent_reg.async_get(light_id)
+            if light_entry is not None and light_entry.device_id is not None:
+                # At least one managed light now has a device; reload so the
+                # timer entities attach to it.
+                hass.async_create_task(
+                    hass.config_entries.async_reload(entry.entry_id)
+                )
+                return
+
+    # ``async_listen_once`` auto-removes the listener after it fires, so we do
+    # NOT register it via ``async_on_unload`` (that would try to remove it a
+    # second time on reload and raise ValueError).
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -174,6 +220,35 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload a Light Timer config entry (alias for :func:`async_reload_entry`)."""
     await async_reload_entry(hass, entry)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow removal of devices that no longer have managed lights (Req 1.5).
+
+    Returns ``True`` if the device's identifier corresponds to a light that is
+    no longer managed by the coordinator (i.e. was removed from the config),
+    allowing Home Assistant to clean up the orphaned device.
+
+    Returns ``False`` for the Integration_Device (entry_id identifier) while the
+    config entry exists, and ``False`` as a safe default for unknown devices.
+    """
+    coordinator: LightTimerCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is None:
+        return True
+
+    for identifier in device_entry.identifiers:
+        if len(identifier) == 2 and identifier[0] == DOMAIN:
+            # If it's the integration device, don't remove while entry exists.
+            if identifier[1] == entry.entry_id:
+                return False
+            # If it's a per-light device, allow removal if light is no longer managed.
+            if identifier[1] not in coordinator.controllers:
+                return True
+    return False
 
 
 # -- Services --------------------------------------------------------------

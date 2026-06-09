@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SERVICE_TURN_OFF, STATE_OFF, STATE_ON
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
@@ -40,6 +41,7 @@ from .const import (
     DEFAULT_GLOBALLY_ENABLED,
     DEFAULT_SUSPENSION,
     DEFAULT_TIMER_DURATION,
+    DOMAIN,
 )
 from .logic import (
     RUNNING_CLASS_STATES,
@@ -61,6 +63,10 @@ _LIGHT_DOMAIN = "light"
 # the controller enters the failure state.
 _OFF_RETRY_INTERVAL: float = 5
 _MAX_OFF_RETRIES = 3
+
+# Dispatcher signal fired each second while any countdown is active, so
+# sensors can push state updates to the UI.
+SIGNAL_TIMER_TICK = f"{DOMAIN}_timer_tick"
 
 
 @dataclass
@@ -195,6 +201,8 @@ class LightTimerCoordinator:
         self.controllers: dict[str, PerLightController] = controllers or {}
         # Cancel callback for the managed-lights state-change subscription.
         self._unsub_state_change: Callable[[], None] | None = None
+        # Cancel callback for the per-second countdown tick.
+        self._unsub_tick: Callable[[], None] | None = None
 
     # -- Subscription lifecycle ------------------------------------------
 
@@ -221,6 +229,68 @@ class LightTimerCoordinator:
         if self._unsub_state_change is not None:
             self._unsub_state_change()
             self._unsub_state_change = None
+        self._stop_tick()
+
+    # -- Per-second tick -------------------------------------------------
+
+    @callback
+    def _start_tick(self) -> None:
+        """Start the per-second tick if not already running."""
+        if self._unsub_tick is not None:
+            return
+        self._schedule_next_tick()
+
+    @callback
+    def _schedule_next_tick(self) -> None:
+        """Schedule the next 1-second tick."""
+        self._unsub_tick = async_call_later(
+            self.hass, 1, self._async_tick
+        )
+
+    @callback
+    def _stop_tick(self) -> None:
+        """Stop the per-second tick if running."""
+        if self._unsub_tick is not None:
+            self._unsub_tick()
+            self._unsub_tick = None
+
+    @callback
+    def _maybe_stop_tick(self) -> None:
+        """Stop the tick if no controllers have active countdowns or suspensions.
+
+        The tick is only needed while there's an active scheduled callback
+        driving a countdown or suspension. If all callbacks have been cancelled,
+        the tick can safely stop even if remaining values are non-zero (they
+        represent stale state that will be cleared on the next state transition).
+        """
+        for controller in self.controllers.values():
+            if controller._cancel_cb is not None:
+                return
+            if controller._suspend_cancel_cb is not None:
+                return
+        self._stop_tick()
+
+    @callback
+    def _async_tick(self, _now) -> None:
+        """Decrement remaining_seconds and suspension_remaining each second."""
+        self._unsub_tick = None  # The one-shot has fired; clear the handle.
+        active = False
+        for controller in self.controllers.values():
+            if controller.state in RUNNING_CLASS_STATES and controller.remaining_seconds > 0 and controller._cancel_cb is not None:
+                controller.remaining_seconds -= 1
+                active = True
+            if controller.state == LightTimerState.SUSPENDED and controller.suspension_remaining > 0 and controller._suspend_cancel_cb is not None:
+                controller.suspension_remaining -= 1
+                active = True
+        if active:
+            self._schedule_next_tick()
+            self._notify_update()
+        # If nothing was active, tick stops naturally (no reschedule).
+
+    @callback
+    def _notify_update(self) -> None:
+        """Push a state update to the timer sensors (live countdown + state)."""
+        async_dispatcher_send(self.hass, SIGNAL_TIMER_TICK)
 
     # -- State-change handling -------------------------------------------
 
@@ -297,6 +367,8 @@ class LightTimerCoordinator:
             controller.failure_active = False
             controller._retry_count = 0
             controller.state = resulting
+            self._maybe_stop_tick()
+            self._notify_update()
 
     # -- Timer start ------------------------------------------------------
 
@@ -332,6 +404,8 @@ class LightTimerCoordinator:
             duration,
             self._make_expiry_callback(light_id),
         )
+        self._start_tick()
+        self._notify_update()
 
     def _make_expiry_callback(self, light_id: str) -> Callable:
         """Build the ``async_call_later`` callback fired when a timer expires.
@@ -379,6 +453,7 @@ class LightTimerCoordinator:
         controller._retry_count = 0
         await self._async_turn_off(controller.light_entity_id)
         self._schedule_off_confirmation(controller)
+        self._notify_update()
 
     @callback
     def _schedule_off_confirmation(self, controller: PerLightController) -> None:
@@ -438,6 +513,8 @@ class LightTimerCoordinator:
                 controller.remaining_seconds = 0
                 controller.failure_active = False
                 controller._retry_count = 0
+                self._maybe_stop_tick()
+                self._notify_update()
                 return
 
             if controller._retry_count < _MAX_OFF_RETRIES:
@@ -451,6 +528,7 @@ class LightTimerCoordinator:
             # in the failure state, raise the failure indication, and notify.
             controller.state = next_state(controller.state, TimerEvent("retry_fail"))
             controller.failure_active = True
+            self._notify_update()
             await self._async_notify_failure(controller)
 
         return _on_confirm
@@ -569,6 +647,8 @@ class LightTimerCoordinator:
         controller.failure_active = False
         controller._retry_count = 0
         controller.state = LightTimerState.IDLE
+        self._maybe_stop_tick()
+        self._notify_update()
         return True
 
     # -- Suspension -------------------------------------------------------
@@ -641,6 +721,8 @@ class LightTimerCoordinator:
             accepted,
             self._make_suspension_end_callback(light_id),
         )
+        self._start_tick()
+        self._notify_update()
         return True
 
     def _make_suspension_end_callback(self, light_id: str) -> Callable:
@@ -679,6 +761,9 @@ class LightTimerCoordinator:
                 globally_enabled=self.globally_enabled,
             ):
                 self.async_start_timer(light_id)
+            else:
+                self._maybe_stop_tick()
+                self._notify_update()
 
         return _on_suspension_end
 
@@ -734,6 +819,8 @@ class LightTimerCoordinator:
             controller._retry_count = 0
             controller.config.enabled = False
             controller.state = next_state(controller.state, TimerEvent("disable"))
+            self._maybe_stop_tick()
+            self._notify_update()
             return
 
         # Enable: clear disabled/suspended status and re-arm if appropriate.
@@ -754,6 +841,8 @@ class LightTimerCoordinator:
             globally_enabled=self.globally_enabled,
         ):
             self.async_start_timer(light_id)
+        else:
+            self._notify_update()
 
     @callback
     def async_set_global(self, enabled: bool) -> None:
@@ -795,6 +884,7 @@ class LightTimerCoordinator:
                     controller.failure_active = False
                     controller._retry_count = 0
                     controller.state = LightTimerState.IDLE
+            self._maybe_stop_tick()
             return
 
         # Master on: resume timers for individually-enabled, on, untimed lights
@@ -851,6 +941,7 @@ class LightTimerCoordinator:
         if controller._cancel_cb is not None:
             controller._cancel_cb()
             controller._cancel_cb = None
+            self._maybe_stop_tick()
 
     @callback
     def _cancel_suspension(self, controller: PerLightController) -> None:
@@ -858,3 +949,4 @@ class LightTimerCoordinator:
         if controller._suspend_cancel_cb is not None:
             controller._suspend_cancel_cb()
             controller._suspend_cancel_cb = None
+            self._maybe_stop_tick()

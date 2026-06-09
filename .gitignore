@@ -1,6 +1,7 @@
-/.DS_Store
+.DS_Store
 /.hypothesis
 /.kiro
 /.venv
 /requirements-dev.txt
 /tests
+__pycache__
