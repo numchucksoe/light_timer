@@ -104,26 +104,17 @@ class LightTimerEnableSwitch(SwitchEntity):
         """Return the live controller for this switch, or ``None`` if removed."""
         return self._coordinator.controllers.get(self._light_id)
 
-    async def async_added_to_hass(self) -> None:
-        """Link this entity to the light's physical device if it has one."""
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return device info to attach this entity to the light's device."""
         ent_reg = er.async_get(self.hass)
         light_entry = ent_reg.async_get(self._light_id)
         if light_entry is not None and light_entry.device_id is not None:
             dev_reg = dr.async_get(self.hass)
             device = dev_reg.async_get(light_entry.device_id)
             if device is not None:
-                self.device_entry = device
-
-    @property
-    def device_info(self) -> DeviceInfo | None:
-        """Return device info for the fallback Timer_Device.
-
-        When the light has a physical device, ``device_entry`` is set in
-        ``async_added_to_hass`` and this property is ignored. For lights
-        without a device, this creates a standalone Timer_Device.
-        """
-        if self.device_entry is not None:
-            return None
+                return DeviceInfo(identifiers=device.identifiers)
+        # Fallback: standalone Timer_Device
         friendly_name = _get_light_friendly_name(self.hass, self._light_id)
         return DeviceInfo(
             identifiers={(DOMAIN, self._light_id)},

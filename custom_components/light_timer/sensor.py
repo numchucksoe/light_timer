@@ -143,16 +143,7 @@ class LightTimerRemainingSensor(SensorEntity):
         return self._coordinator.controllers.get(self._light_entity_id)
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to the coordinator's per-second tick signal and link to device."""
-        # Link this entity to the light's physical device if it has one.
-        ent_reg = er.async_get(self.hass)
-        light_entry = ent_reg.async_get(self._light_entity_id)
-        if light_entry is not None and light_entry.device_id is not None:
-            dev_reg = dr.async_get(self.hass)
-            device = dev_reg.async_get(light_entry.device_id)
-            if device is not None:
-                self.device_entry = device
-
+        """Subscribe to the coordinator's per-second tick signal."""
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, SIGNAL_TIMER_TICK, self._handle_tick
@@ -166,15 +157,21 @@ class LightTimerRemainingSensor(SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo | None:
-        """Return device info for the fallback Timer_Device.
+        """Return device info to attach this entity to the light's device.
 
-        When the light belongs to a physical device, ``device_entry`` is set
-        in ``async_added_to_hass`` and this property is ignored by HA. For
-        lights without a device (template lights, etc.), this creates a
-        standalone Timer_Device.
+        Looks up the light entity's device in the registry. If found, returns
+        DeviceInfo with that device's identifiers — HA will add this config
+        entry to the existing device and link the entity there. If the light
+        has no device, falls back to a standalone Timer_Device.
         """
-        if self.device_entry is not None:
-            return None
+        ent_reg = er.async_get(self.hass)
+        light_entry = ent_reg.async_get(self._light_entity_id)
+        if light_entry is not None and light_entry.device_id is not None:
+            dev_reg = dr.async_get(self.hass)
+            device = dev_reg.async_get(light_entry.device_id)
+            if device is not None:
+                return DeviceInfo(identifiers=device.identifiers)
+        # Fallback: standalone Timer_Device
         friendly_name = _get_light_friendly_name(
             self.hass, self._light_entity_id
         )
