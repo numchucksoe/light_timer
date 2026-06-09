@@ -51,19 +51,6 @@ def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
     return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
 
 
-def _get_light_device_info(hass: HomeAssistant, light_entity_id: str) -> DeviceInfo | None:
-    """Look up the device that owns the light entity, if any."""
-    ent_reg = er.async_get(hass)
-    entry = ent_reg.async_get(light_entity_id)
-    if entry is None or entry.device_id is None:
-        return None
-    dev_reg = dr.async_get(hass)
-    device = dev_reg.async_get(entry.device_id)
-    if device is None:
-        return None
-    return DeviceInfo(identifiers=device.identifiers)
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -117,13 +104,26 @@ class LightTimerEnableSwitch(SwitchEntity):
         """Return the live controller for this switch, or ``None`` if removed."""
         return self._coordinator.controllers.get(self._light_id)
 
+    async def async_added_to_hass(self) -> None:
+        """Link this entity to the light's physical device if it has one."""
+        ent_reg = er.async_get(self.hass)
+        light_entry = ent_reg.async_get(self._light_id)
+        if light_entry is not None and light_entry.device_id is not None:
+            dev_reg = dr.async_get(self.hass)
+            device = dev_reg.async_get(light_entry.device_id)
+            if device is not None:
+                self.device_entry = device
+
     @property
     def device_info(self) -> DeviceInfo | None:
-        """Return device info to attach this entity to the light's device."""
-        info = _get_light_device_info(self.hass, self._light_id)
-        if info is not None:
-            return info
-        # Fallback: standalone Timer_Device
+        """Return device info for the fallback Timer_Device.
+
+        When the light has a physical device, ``device_entry`` is set in
+        ``async_added_to_hass`` and this property is ignored. For lights
+        without a device, this creates a standalone Timer_Device.
+        """
+        if self.device_entry is not None:
+            return None
         friendly_name = _get_light_friendly_name(self.hass, self._light_id)
         return DeviceInfo(
             identifiers={(DOMAIN, self._light_id)},

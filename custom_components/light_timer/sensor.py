@@ -70,25 +70,6 @@ def _get_light_friendly_name(hass: HomeAssistant, light_entity_id: str) -> str:
     return light_entity_id.split(".", 1)[-1].replace("_", " ").title()
 
 
-def _get_light_device_info(hass: HomeAssistant, light_entity_id: str) -> DeviceInfo | None:
-    """Look up the device that owns the light entity, if any.
-
-    Returns a DeviceInfo with the light's device identifiers so that timer
-    entities attach to the same device as the light. Returns None if the light
-    has no device (e.g. template lights), in which case callers fall back to a
-    standalone Timer_Device.
-    """
-    ent_reg = er.async_get(hass)
-    entry = ent_reg.async_get(light_entity_id)
-    if entry is None or entry.device_id is None:
-        return None
-    dev_reg = dr.async_get(hass)
-    device = dev_reg.async_get(entry.device_id)
-    if device is None:
-        return None
-    return DeviceInfo(identifiers=device.identifiers)
-
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -162,7 +143,16 @@ class LightTimerRemainingSensor(SensorEntity):
         return self._coordinator.controllers.get(self._light_entity_id)
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to the coordinator's per-second tick signal."""
+        """Subscribe to the coordinator's per-second tick signal and link to device."""
+        # Link this entity to the light's physical device if it has one.
+        ent_reg = er.async_get(self.hass)
+        light_entry = ent_reg.async_get(self._light_entity_id)
+        if light_entry is not None and light_entry.device_id is not None:
+            dev_reg = dr.async_get(self.hass)
+            device = dev_reg.async_get(light_entry.device_id)
+            if device is not None:
+                self.device_entry = device
+
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, SIGNAL_TIMER_TICK, self._handle_tick
@@ -176,16 +166,15 @@ class LightTimerRemainingSensor(SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo | None:
-        """Return device info to attach this entity to the light's device.
+        """Return device info for the fallback Timer_Device.
 
-        If the managed light belongs to a device, the timer entity attaches to
-        that same device so they appear together in the UI. If the light has no
-        device (e.g. template lights), falls back to a standalone Timer_Device.
+        When the light belongs to a physical device, ``device_entry`` is set
+        in ``async_added_to_hass`` and this property is ignored by HA. For
+        lights without a device (template lights, etc.), this creates a
+        standalone Timer_Device.
         """
-        info = _get_light_device_info(self.hass, self._light_entity_id)
-        if info is not None:
-            return info
-        # Fallback: standalone Timer_Device
+        if self.device_entry is not None:
+            return None
         friendly_name = _get_light_friendly_name(
             self.hass, self._light_entity_id
         )
