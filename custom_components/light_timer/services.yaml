@@ -1,0 +1,38 @@
+# Light Timer integration services.
+#
+# Both services target one or more entities (a managed light directly, or one of
+# the integration's own sensor/switch/button entities) and map onto the
+# coordinator's pure control methods. See __init__.py for the handlers.
+
+cancel:
+  name: Cancel timer
+  description: >-
+    Cancel the running countdown for the targeted managed light(s), leaving the
+    light on. Has no effect when there is no active timer.
+  target:
+    entity:
+      integration: light_timer
+
+suspend:
+  name: Suspend timer
+  description: >-
+    Suspend timer automation for the targeted managed light(s). When duration is
+    omitted each light's configured default suspension is used.
+  target:
+    entity:
+      integration: light_timer
+  fields:
+    duration:
+      name: Duration
+      description: >-
+        Suspension period in seconds (integer in [1, 86400]). When omitted the
+        light's configured default suspension is used.
+      required: false
+      example: 3600
+      selector:
+        number:
+          min: 1
+          max: 86400
+          step: 1
+          unit_of_measurement: seconds
+          mode: box

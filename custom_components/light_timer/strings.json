@@ -1,0 +1,92 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Light Timer",
+        "description": "Create the Light Timer integration. Manage lights from the integration's Configure options once setup completes."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Light Timer is already configured. To add or manage lights, go to Settings → Devices & Services → Light Timer → Configure."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Light Timer",
+        "description": "Add, edit, or remove a managed light.",
+        "menu_options": {
+          "add_light": "Add a managed light",
+          "edit_light": "Edit a managed light",
+          "remove_light": "Remove a managed light"
+        }
+      },
+      "add_light": {
+        "title": "Add a managed light",
+        "description": "Choose a light and configure its timer.",
+        "data": {
+          "light_entity_id": "Light",
+          "timer_duration": "Timer duration (seconds)",
+          "default_suspension": "Default suspension (seconds)",
+          "notification_service": "Notification service (optional)",
+          "enabled": "Enabled"
+        }
+      },
+      "edit_light": {
+        "title": "Edit a managed light",
+        "description": "Choose which managed light to edit.",
+        "data": {
+          "light_entity_id": "Light"
+        }
+      },
+      "edit_light_details": {
+        "title": "Edit {light_entity_id}",
+        "description": "Update the timer settings for {light_entity_id}. The light cannot be changed.",
+        "data": {
+          "timer_duration": "Timer duration (seconds)",
+          "default_suspension": "Default suspension (seconds)",
+          "notification_service": "Notification service (optional)",
+          "enabled": "Enabled"
+        }
+      },
+      "remove_light": {
+        "title": "Remove a managed light",
+        "description": "Choose which managed light to remove.",
+        "data": {
+          "light_entity_id": "Light"
+        }
+      },
+      "remove_light_confirm": {
+        "title": "Remove {light_entity_id}",
+        "description": "Remove {light_entity_id} from Light Timer? This stops its timer and removes its entities."
+      }
+    },
+    "error": {
+      "range": "Value must be an integer between 1 and 86400 seconds.",
+      "integer": "Value must be a whole number (integer).",
+      "already_managed": "That light is already managed by Light Timer.",
+      "entity_not_found": "That entity was not found in Home Assistant.",
+      "not_a_light": "The selected entity is not a light."
+    },
+    "abort": {
+      "no_lights": "There are no managed lights to act on."
+    }
+  },
+  "services": {
+    "cancel": {
+      "name": "Cancel timer",
+      "description": "Cancel the running countdown for the targeted managed light(s), leaving the light on.",
+      "fields": {}
+    },
+    "suspend": {
+      "name": "Suspend timer",
+      "description": "Suspend timer automation for the targeted managed light(s).",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "Suspension period in seconds (integer in [1, 86400]). When omitted the light's configured default suspension is used."
+        }
+      }
+    }
+  }
+}

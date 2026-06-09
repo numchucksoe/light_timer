@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "light_timer"
+version = "1.0.0"
+description = "Home Assistant HACS custom integration that turns managed lights off after a configurable countdown."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "hypothesis==6.122.3",
+    "pytest-homeassistant-custom-component==0.13.190",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# Select the Hypothesis profile that enforces a minimum of 100 iterations per
+# property test (registered in tests/conftest.py).
+addopts = "-p no:cacheprovider"
+
+[tool.hypothesis]
+# Backstop for the minimum iteration requirement; the per-profile settings in
+# tests/conftest.py are authoritative when profiles are loaded.
+max_examples = 100

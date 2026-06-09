@@ -1,0 +1,163 @@
+"""Remaining-time sensor platform for the Light Timer integration.
+
+This platform exposes one sensor entity per managed light reporting the timer's
+remaining time in seconds as the Home Assistant sensor state (Req 10.1, 10.5).
+The numeric state and the entity's attributes are derived from the pure
+:func:`logic.derive_sensor` helper applied to a snapshot of the light's live
+:class:`~.coordinator.PerLightController` runtime state, so the entity stays a
+thin adapter over the coordinator and the derivation logic remains
+property-tested in isolation (Property 7).
+
+Each sensor exposes the attributes required by Req 10.4 plus the human-readable
+``formatted_remaining`` M:SS view (Req 4.1, 4.3):
+
+* ``timer_duration`` -- the configured countdown length in seconds;
+* ``enabled`` -- ``False`` exactly when the light is disabled (Req 10.6);
+* ``suspension_remaining`` -- remaining suspension seconds, ``0`` when inactive;
+* ``failure_active`` -- ``True`` exactly while a shutoff failure is indicated;
+* ``formatted_remaining`` -- the numeric state rendered as ``"M:SS"`` via
+  :func:`logic.format_remaining`.
+
+The sensors are registered as default/visible entities (``entity_registry_
+enabled_default`` defaults to ``True`` and ``entity_registry_visible_default`` is
+``True``) so they appear on the Home Assistant Overview automatically (Req 10.2).
+Sensors are created when their managed light is added (one entity per controller
+at setup) and removed when the light is removed, because the platform is set up
+from the per-entry coordinator's controllers and the config-entry reload on
+add/remove re-runs ``async_setup_entry`` against the new controller set
+(Req 10.1, 10.3).
+
+Coordinator access assumption: ``async_setup_entry`` reads the integration's
+:class:`~.coordinator.LightTimerCoordinator` from
+``hass.data[DOMAIN][entry.entry_id]``. This is the convention established by the
+integration's ``async_setup_entry`` in ``__init__.py`` (task 8.4); when that
+data is not yet present (e.g. the platform is set up before the coordinator is
+stored) no entities are added.
+"""
+
+from __future__ import annotations
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTime
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .const import DOMAIN
+from .coordinator import LightTimerCoordinator, PerLightController
+from .logic import ControllerRuntimeState, SensorRepresentation, derive_sensor
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the remaining-time sensors for the config entry's managed lights.
+
+    Reads the integration coordinator from ``hass.data[DOMAIN][entry.entry_id]``
+    (task 8.4 convention) and creates one :class:`LightTimerRemainingSensor` per
+    managed controller. Because the config entry is reloaded on add/remove of a
+    managed light, this runs again with the updated controller set, which is what
+    creates a sensor on add and removes it on removal (Req 10.1, 10.3).
+    """
+    coordinator: LightTimerCoordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    if coordinator is None:
+        # The coordinator has not been stored yet; nothing to expose.
+        return
+
+    entities = [
+        LightTimerRemainingSensor(coordinator, controller)
+        for controller in coordinator.controllers.values()
+    ]
+    if entities:
+        async_add_entities(entities)
+
+
+class LightTimerRemainingSensor(SensorEntity):
+    """Per-light sensor reporting the timer's remaining time in seconds.
+
+    The entity is a thin adapter: every read of :attr:`native_value` and
+    :attr:`extra_state_attributes` projects the light's **live** controller
+    runtime state through the pure :func:`logic.derive_sensor` helper, so the
+    sensor always reflects the coordinator's current state without holding its
+    own copy (Req 10.4, 10.5, 10.6). The state is the remaining seconds while a
+    timer runs and ``0`` for every non-running state (idle, suspended, disabled).
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = True
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    # Register as a default/visible entity so it appears on the Overview
+    # automatically (Req 10.2).
+    _attr_entity_registry_enabled_default = True
+    _attr_entity_registry_visible_default = True
+
+    def __init__(
+        self,
+        coordinator: LightTimerCoordinator,
+        controller: PerLightController,
+    ) -> None:
+        """Initialise the sensor for a single managed light.
+
+        Args:
+            coordinator: The integration coordinator owning the controllers.
+            controller: The per-light controller this sensor reflects.
+        """
+        self._coordinator = coordinator
+        self._light_entity_id = controller.light_entity_id
+        # A stable, per-light unique id so the entity persists across reloads
+        # and is removed only when its managed light is removed (Req 10.3).
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{self._light_entity_id}_remaining"
+        self._attr_name = f"{self._light_entity_id} timer remaining"
+
+    @property
+    def _controller(self) -> PerLightController | None:
+        """Return the live controller for this light, or ``None`` if removed."""
+        return self._coordinator.controllers.get(self._light_entity_id)
+
+    @property
+    def available(self) -> bool:
+        """Whether the sensor's managed light is still managed."""
+        return self._controller is not None
+
+    def _derive(self) -> SensorRepresentation | None:
+        """Project the live controller runtime state via :func:`derive_sensor`."""
+        controller = self._controller
+        if controller is None:
+            return None
+        runtime = ControllerRuntimeState(
+            state=controller.state,
+            remaining_seconds=controller.remaining_seconds,
+            timer_duration=controller.config.timer_duration,
+            suspension_remaining=controller.suspension_remaining,
+        )
+        return derive_sensor(runtime)
+
+    @property
+    def native_value(self) -> int:
+        """The remaining seconds; ``0`` when no timer is running/disabled."""
+        representation = self._derive()
+        if representation is None:
+            return 0
+        return representation.state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """The derived sensor attributes (Req 10.4).
+
+        Always includes ``timer_duration``, ``enabled``, ``suspension_remaining``,
+        ``failure_active`` and ``formatted_remaining``.
+        """
+        representation = self._derive()
+        if representation is None:
+            return {}
+        return dict(representation.attributes)
