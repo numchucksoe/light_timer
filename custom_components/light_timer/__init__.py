@@ -129,6 +129,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Clean up entity registry entries for lights that were removed from the
+    # config. On reload after a light removal, the entity platforms no longer
+    # create entities for that light, but the registry entries persist until
+    # explicitly removed.
+    _async_cleanup_removed_light_entities(hass, entry, controllers)
+
     # Reload the entry whenever its options change (add/edit/remove light, or a
     # persisted enable/disable flag) so the coordinator and entities rebuild.
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
@@ -143,6 +149,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_register_services(hass)
 
     return True
+
+
+@callback
+def _async_cleanup_removed_light_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    controllers: dict[str, PerLightController],
+) -> None:
+    """Remove entity registry entries for lights no longer in the config.
+
+    When a managed light is removed via the options flow, the entry reloads.
+    The entity platforms will not recreate entities for the removed light, but
+    stale entity registry entries remain until explicitly removed here.
+    """
+    ent_reg = er.async_get(hass)
+    entries_to_remove: list[str] = []
+    prefix = f"{entry.entry_id}_"
+
+    for entity_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity_entry.unique_id.startswith(prefix):
+            # Extract the light_id from the unique_id pattern:
+            # "{entry_id}_{light_entity_id}_{suffix}"
+            remainder = entity_entry.unique_id[len(prefix):]
+            # Match against known managed light ids
+            light_id = None
+            for managed_id in controllers:
+                if remainder.startswith(f"{managed_id}_"):
+                    light_id = managed_id
+                    break
+            if light_id is None and remainder != "master":
+                # This entity belongs to a light no longer in the config
+                entries_to_remove.append(entity_entry.entity_id)
+
+    for entity_id in entries_to_remove:
+        ent_reg.async_remove(entity_id)
 
 
 @callback
