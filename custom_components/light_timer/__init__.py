@@ -93,6 +93,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     the integration services.
     """
     options = entry.options or {}
+    _LOGGER.warning(
+        "async_setup_entry called with lights: %s",
+        [l.get(CONF_LIGHT_ENTITY_ID) for l in options.get(CONF_LIGHTS, [])],
+    )
 
     controllers: dict[str, PerLightController] = {}
     for light in options.get(CONF_LIGHTS, []):
@@ -177,7 +181,7 @@ def _async_cleanup_removed_light_entities(
     master_uid = f"{entry.entry_id}_master"
 
     all_entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
-    _LOGGER.debug(
+    _LOGGER.warning(
         "Entity cleanup: entry_id=%s, managed_lights=%s, registry_entries=%d, valid_prefixes=%s",
         entry.entry_id,
         list(controllers.keys()),
