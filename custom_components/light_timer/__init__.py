@@ -176,7 +176,16 @@ def _async_cleanup_removed_light_entities(
     valid_prefixes = {f"{entry.entry_id}_{light_id}_" for light_id in controllers}
     master_uid = f"{entry.entry_id}_master"
 
-    for entity_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+    all_entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    _LOGGER.debug(
+        "Entity cleanup: entry_id=%s, managed_lights=%s, registry_entries=%d, valid_prefixes=%s",
+        entry.entry_id,
+        list(controllers.keys()),
+        len(all_entries),
+        valid_prefixes,
+    )
+
+    for entity_entry in all_entries:
         uid = entity_entry.unique_id
         # Keep the master switch
         if uid == master_uid:
