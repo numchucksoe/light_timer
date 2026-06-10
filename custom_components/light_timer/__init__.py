@@ -165,22 +165,32 @@ def _async_cleanup_removed_light_entities(
     """
     ent_reg = er.async_get(hass)
     entries_to_remove: list[str] = []
-    prefix = f"{entry.entry_id}_"
+
+    # Build the set of unique_id suffixes that should still exist.
+    # Each managed light produces entities with unique_ids like:
+    #   {entry_id}_{light_entity_id}_remaining
+    #   {entry_id}_{light_entity_id}_enable
+    #   {entry_id}_{light_entity_id}_cancel
+    #   {entry_id}_{light_entity_id}_suspend
+    # The master switch has: {entry_id}_master
+    valid_prefixes = {f"{entry.entry_id}_{light_id}_" for light_id in controllers}
+    master_uid = f"{entry.entry_id}_master"
 
     for entity_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        if entity_entry.unique_id.startswith(prefix):
-            # Extract the light_id from the unique_id pattern:
-            # "{entry_id}_{light_entity_id}_{suffix}"
-            remainder = entity_entry.unique_id[len(prefix):]
-            # Match against known managed light ids
-            light_id = None
-            for managed_id in controllers:
-                if remainder.startswith(f"{managed_id}_"):
-                    light_id = managed_id
-                    break
-            if light_id is None and remainder != "master":
-                # This entity belongs to a light no longer in the config
-                entries_to_remove.append(entity_entry.entity_id)
+        uid = entity_entry.unique_id
+        # Keep the master switch
+        if uid == master_uid:
+            continue
+        # Keep entities that belong to a currently managed light
+        if any(uid.startswith(prefix) for prefix in valid_prefixes):
+            continue
+        # This entity belongs to a removed light — clean it up
+        _LOGGER.info(
+            "Cleaning up orphaned entity %s (unique_id=%s) for removed light",
+            entity_entry.entity_id,
+            uid,
+        )
+        entries_to_remove.append(entity_entry.entity_id)
 
     for entity_id in entries_to_remove:
         ent_reg.async_remove(entity_id)
