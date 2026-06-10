@@ -208,24 +208,28 @@ def _async_cleanup_removed_light_entities(
     for entity_id in entries_to_remove:
         ent_reg.async_remove(entity_id)
 
-    # Also clean up the config entry's association with devices that no longer
+    # Clean up the config entry's association with devices that no longer
     # have any Light Timer entities. When timer entities linked to an external
     # device (e.g. ESPHome), the light_timer config entry was added to that
     # device. After removal, the device still shows "Light Timer" as an
     # integration until we explicitly remove the association.
-    if entries_to_remove:
-        dev_reg = dr.async_get(hass)
-        remaining_entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
-        # Devices that still have our entities
-        active_device_ids = {
-            e.device_id for e in remaining_entries if e.device_id is not None
-        }
-        # Find all devices that have our config entry but no longer have our entities
-        for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
-            if device.id not in active_device_ids:
-                dev_reg.async_update_device(
-                    device.id, remove_config_entry_id=entry.entry_id
-                )
+    dev_reg = dr.async_get(hass)
+    remaining_entries = er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    # Devices that still have our entities
+    active_device_ids = {
+        e.device_id for e in remaining_entries if e.device_id is not None
+    }
+    # Find all devices that have our config entry but no longer have our entities
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        if device.id not in active_device_ids:
+            _LOGGER.warning(
+                "Removing config entry from device %s (%s)",
+                device.name,
+                device.id,
+            )
+            dev_reg.async_update_device(
+                device.id, remove_config_entry_id=entry.entry_id
+            )
 
 
 @callback
