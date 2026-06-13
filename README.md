@@ -69,3 +69,6 @@ not affected; the new duration applies on the next timer start.
 
 Adding support for additional domains in the future requires only appending to
 the `SUPPORTED_DOMAINS` tuple in `const.py`.
+
+## Contributers
+- Charlie Buchanan (charlie@buchananfamily.org)
