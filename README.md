@@ -53,3 +53,6 @@ conversion or record it in long-term statistics.
 The **Timer duration** number entity persists changes immediately to both memory
 and config entry options — no reload or restart needed. A running countdown is
 not affected; the new duration applies on the next timer start.
+
+## Contributers
+- Charlie Buchanan (charlie@buchananfamily.org)
