@@ -4,7 +4,7 @@ All notable changes to the Light Timer integration will be documented in this fi
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.3] - 2026-06-13
+## [1.0.4] - 2026-06-13
 
 ### Added
 
@@ -13,18 +13,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Entity selector now shows both light and switch entities in the options flow
 - Domain-appropriate service dispatch (`switch.turn_off` for switches, `light.turn_off` for lights)
 - Validation error `"not_supported_domain"` for entities outside supported domains
-- Number platform with `LightTimerDurationNumber` entity for on-the-fly timer duration adjustment
-- Cascading time display format for remaining-time sensor (`H:MM:SS` / `M:SS` / `:SS`)
 - Property-based tests (Hypothesis) for 8 correctness properties
 - Integration tests for backward compatibility and end-to-end switch entity flow
 - MIT license
+- CHANGELOG.md
 
 ### Changed
 
 - Config flow validation uses `SUPPORTED_DOMAINS` membership check instead of hardcoded `"light."` prefix
 - Coordinator derives turn-off service domain dynamically from entity ID instead of hardcoded `_LIGHT_DOMAIN`
 - Notification messages use domain-neutral phrasing ("failed to turn off" without domain-specific nouns)
-- Timer remaining sensor reports formatted time string instead of numeric seconds
+- README updated to reflect switch entity support
 
 ### Backward Compatibility
 
@@ -32,6 +31,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The `light_entity_id` config key is preserved (used for both light and switch entities)
 - Helper entity unique IDs remain in `{entry_id}_{entity_id}_{suffix}` format
 - Service names (`light_timer.cancel`, `light_timer.suspend`) are unchanged
+
+## [1.0.3] - 2026-06-13
+
+### Added
+
+- Number platform with `LightTimerDurationNumber` entity for on-the-fly timer duration adjustment
+- Cascading time display format for remaining-time sensor (`H:MM:SS` / `M:SS` / `:SS`)
+
+### Changed
+
+- Timer remaining sensor reports formatted time string instead of numeric seconds
 
 ## [1.0.2] - 2026-06-10
 
