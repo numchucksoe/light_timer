@@ -36,6 +36,7 @@ from .const import (
     DEFAULT_SUSPENSION,
     DEFAULT_TIMER_DURATION,
     DOMAIN,
+    SUPPORTED_DOMAINS,
 )
 from .logic import validate_duration, validate_suspension
 
@@ -76,6 +77,15 @@ class LightTimerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> LightTimerOptionsFlow:
         """Return the options flow that manages add/edit/remove of lights."""
         return LightTimerOptionsFlow()
+
+
+def _extract_domain(entity_id: str) -> str:
+    """Extract the domain prefix from an entity ID (substring before first '.').
+
+    Returns the portion before the first '.' character, or an empty string
+    if the entity ID contains no '.' character.
+    """
+    return entity_id.split(".", 1)[0] if "." in entity_id else ""
 
 
 class LightTimerOptionsFlow(config_entries.OptionsFlow):
@@ -139,7 +149,7 @@ class LightTimerOptionsFlow(config_entries.OptionsFlow):
                     CONF_LIGHT_ENTITY_ID,
                     default=data.get(CONF_LIGHT_ENTITY_ID),
                 ): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="light")
+                    selector.EntitySelectorConfig(domain=list(SUPPORTED_DOMAINS))
                 ),
                 vol.Required(
                     CONF_TIMER_DURATION,
@@ -182,9 +192,9 @@ class LightTimerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             entity_id = user_input.get(CONF_LIGHT_ENTITY_ID)
 
-            # Validate the light entity: must be light.* and exist in HA.
-            if not isinstance(entity_id, str) or not entity_id.startswith("light."):
-                errors[CONF_LIGHT_ENTITY_ID] = "not_a_light"
+            # Validate the entity: domain membership → existence → duplicate.
+            if not isinstance(entity_id, str) or _extract_domain(entity_id) not in SUPPORTED_DOMAINS:
+                errors[CONF_LIGHT_ENTITY_ID] = "not_supported_domain"
             elif self.hass.states.get(entity_id) is None:
                 errors[CONF_LIGHT_ENTITY_ID] = "entity_not_found"
             elif any(
