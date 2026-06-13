@@ -40,4 +40,4 @@ MAX_DURATION_SECONDS: Final = 86400
 
 # --- Platforms ------------------------------------------------------------
 # Entity platforms the integration forwards config entry setup to.
-PLATFORMS: Final = ["sensor", "switch", "button"]
+PLATFORMS: Final = ["sensor", "switch", "button", "number"]
