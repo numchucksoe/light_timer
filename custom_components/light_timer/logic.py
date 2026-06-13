@@ -448,22 +448,29 @@ def validate_suspension(submitted: object, current: int | None) -> ValidationRes
 
 
 def format_remaining(total_seconds: int) -> str:
-    """Format a remaining-time duration in seconds as ``"M:SS"``.
+    """Format a remaining-time duration in seconds as a cascading time string.
 
-    The output is the canonical minutes-and-seconds dashboard form (Req 4.1,
-    4.3): the whole number of minutes with no leading zero, a colon, and the
-    leftover seconds zero-padded to two digits in the range ``00``-``59``.
+    The output uses a cascading format depending on the magnitude of the input:
 
-    The formatting round-trips exactly: parsing the output back yields the
-    original value, i.e. ``M * 60 + SS == total_seconds`` (Property 6). In
-    particular ``format_remaining(0) == "0:00"``.
+    * ``total_seconds >= 3600``: ``H:MM:SS`` — hours with no leading zero,
+      minutes and seconds each zero-padded to two digits.
+    * ``60 <= total_seconds <= 3599``: ``M:SS`` — minutes with no leading zero,
+      seconds zero-padded to two digits.
+    * ``1 <= total_seconds <= 59``: ``:SS`` — a leading colon followed by
+      seconds zero-padded to two digits.
+    * ``total_seconds == 0``: the literal string ``"0:00"``.
+
+    The formatting round-trips exactly: parsing the output back into seconds
+    yields the original value (Property 1). For ``H:MM:SS`` the round-trip is
+    ``H*3600 + MM*60 + SS``; for ``M:SS`` it is ``M*60 + SS``; for ``:SS`` it
+    is simply ``SS``.
 
     Args:
         total_seconds: A non-negative whole number of seconds remaining. A timer
             that has reached zero is rendered as ``"0:00"``.
 
     Returns:
-        The remaining time formatted as ``"M:SS"`` with zero-padded seconds.
+        The remaining time formatted as described above.
 
     Raises:
         TypeError: If ``total_seconds`` is not a true integer (``bool`` is an
@@ -477,8 +484,20 @@ def format_remaining(total_seconds: int) -> str:
     if total_seconds < 0:
         raise ValueError("total_seconds must be non-negative")
 
-    minutes, seconds = divmod(total_seconds, 60)
-    return f"{minutes}:{seconds:02d}"
+    if total_seconds == 0:
+        return "0:00"
+
+    if total_seconds >= 3600:
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+    if total_seconds >= 60:
+        minutes, seconds = divmod(total_seconds, 60)
+        return f"{minutes}:{seconds:02d}"
+
+    # 1..59: just seconds with a leading colon
+    return f":{total_seconds:02d}"
 
 
 @dataclass(frozen=True)
@@ -510,18 +529,19 @@ class SensorRepresentation:
     """The pure derived representation backing a light's timer sensor entity.
 
     Attributes:
-        state: The numeric sensor state in seconds: the remaining seconds while
-            a timer is running, and ``0`` for every non-running state (idle,
-            suspended, disabled).
+        state: The formatted time string produced by :func:`format_remaining`
+            applied to the effective remaining seconds. While a timer is in a
+            running-class state this is the formatted remaining countdown; for
+            every non-running state (idle, suspended, disabled) this is
+            ``"0:00"``.
         attributes: The sensor's exposed attributes. Always includes
             ``timer_duration``, ``enabled`` (``False`` exactly when the light is
             disabled), ``suspension_remaining`` (``0`` exactly when no suspension
             is active), ``failure_active`` (``True`` exactly in the ``FAILED``
-            state), and ``formatted_remaining`` (the numeric state rendered as
-            ``"M:SS"`` via :func:`format_remaining`).
+            state), and ``formatted_remaining`` (which equals ``state``).
     """
 
-    state: int
+    state: str
     attributes: dict[str, object]
 
 
@@ -532,14 +552,16 @@ def derive_sensor(runtime: ControllerRuntimeState) -> SensorRepresentation:
     onto the values an HA sensor entity exposes, so the derivation can be
     property-tested in isolation (Property 7).
 
-    The numeric state is the remaining seconds **only** while the timer is in a
+    The state is the formatted time string produced by :func:`format_remaining`
+    applied to the effective remaining seconds. While the timer is in a
     running-class state (:attr:`~LightTimerState.RUNNING`,
-    :attr:`~LightTimerState.COMMANDING_OFF`, :attr:`~LightTimerState.FAILED`);
-    for every non-running state (idle, suspended, disabled) the state is ``0``
-    (Req 10.5, 10.6). A negative ``remaining_seconds`` is clamped to ``0`` so the
-    sensor never reports a nonsensical countdown.
+    :attr:`~LightTimerState.COMMANDING_OFF`, :attr:`~LightTimerState.FAILED`)
+    the effective value is ``max(0, remaining_seconds)``; for every non-running
+    state (idle, suspended, disabled) the effective value is ``0``, yielding a
+    state of ``"0:00"`` (Req 3.1, 3.2). A negative ``remaining_seconds`` is
+    clamped to ``0`` so the sensor never reports a nonsensical countdown.
 
-    The attributes always include (Req 10.4):
+    The attributes always include (Req 3.3, 3.4):
 
     * ``timer_duration`` -- the configured duration in seconds;
     * ``enabled`` -- ``False`` exactly when the state is
@@ -548,8 +570,7 @@ def derive_sensor(runtime: ControllerRuntimeState) -> SensorRepresentation:
       when no suspension is active (clamped to ``0`` if negative);
     * ``failure_active`` -- ``True`` exactly in the
       :attr:`~LightTimerState.FAILED` state;
-    * ``formatted_remaining`` -- the numeric state rendered as ``"M:SS"`` via
-      :func:`format_remaining`.
+    * ``formatted_remaining`` -- the same formatted time string as ``state``.
 
     Args:
         runtime: The controller runtime snapshot to project.
@@ -574,7 +595,7 @@ def derive_sensor(runtime: ControllerRuntimeState) -> SensorRepresentation:
         "formatted_remaining": format_remaining(numeric_state),
     }
 
-    return SensorRepresentation(state=numeric_state, attributes=attributes)
+    return SensorRepresentation(state=format_remaining(numeric_state), attributes=attributes)
 
 
 @dataclass(frozen=True)

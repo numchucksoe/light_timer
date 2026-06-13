@@ -37,13 +37,8 @@ stored) no entities are added.
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
@@ -141,9 +136,6 @@ class LightTimerRemainingSensor(SensorEntity):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.MEASUREMENT
     # Register as a default/visible entity so it appears on the Overview
     # automatically (Req 10.2).
     _attr_entity_registry_enabled_default = True
@@ -226,11 +218,11 @@ class LightTimerRemainingSensor(SensorEntity):
         return derive_sensor(runtime)
 
     @property
-    def native_value(self) -> int:
-        """The remaining seconds; ``0`` when no timer is running/disabled."""
+    def native_value(self) -> str:
+        """The formatted remaining time string; ``"0:00"`` when no timer is running/disabled."""
         representation = self._derive()
         if representation is None:
-            return 0
+            return "0:00"
         return representation.state
 
     @property
