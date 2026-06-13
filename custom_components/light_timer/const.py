@@ -26,6 +26,10 @@ CONF_DEFAULT_SUSPENSION: Final = "default_suspension"
 CONF_NOTIFICATION_SERVICE: Final = "notification_service"
 CONF_ENABLED: Final = "enabled"
 
+# --- Supported domains ----------------------------------------------------
+# Entity domains the integration accepts for management. (Req 6.1)
+SUPPORTED_DOMAINS: Final = ("light", "switch")
+
 # --- Default values -------------------------------------------------------
 # Defaults shown/applied when adding a managed light. (Req 9.2)
 DEFAULT_TIMER_DURATION: Final = 300

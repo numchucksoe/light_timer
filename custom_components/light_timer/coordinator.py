@@ -42,6 +42,7 @@ from .const import (
     DEFAULT_SUSPENSION,
     DEFAULT_TIMER_DURATION,
     DOMAIN,
+    SUPPORTED_DOMAINS,
 )
 from .logic import (
     RUNNING_CLASS_STATES,
@@ -54,10 +55,7 @@ from .logic import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Entity domain of the managed lights and the service used to turn them off.
-_LIGHT_DOMAIN = "light"
-
-# Commanding-off retry tuning (Req 1.5). After the initial ``light.turn_off`` a
+# Commanding-off retry tuning (Req 1.5). After the initial ``turn_off`` a
 # confirmation check runs every ``_OFF_RETRY_INTERVAL`` seconds; while the light
 # is still on the command is re-issued up to ``_MAX_OFF_RETRIES`` times before
 # the controller enters the failure state.
@@ -588,12 +586,20 @@ class LightTimerCoordinator:
                 exc_info=True,
             )
 
-    async def _async_turn_off(self, light_id: str) -> None:
-        """Issue a ``light.turn_off`` service call for the managed light."""
+    async def _async_turn_off(self, entity_id: str) -> None:
+        """Issue a domain-appropriate turn_off service call for the managed entity."""
+        domain = entity_id.split(".", 1)[0] if "." in entity_id else ""
+        if domain not in SUPPORTED_DOMAINS:
+            _LOGGER.warning(
+                "Cannot turn off %s: domain %r is not a supported domain",
+                entity_id,
+                domain,
+            )
+            return
         await self.hass.services.async_call(
-            _LIGHT_DOMAIN,
+            domain,
             SERVICE_TURN_OFF,
-            {"entity_id": light_id},
+            {"entity_id": entity_id},
             blocking=False,
         )
 
